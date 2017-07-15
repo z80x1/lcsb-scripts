@@ -1,0 +1,4 @@
+#!/bin/bash
+#$1 - user
+  ssh-keygen -q -t rsa -f /home/$USER/.ssh/id_rsa -N ""
+

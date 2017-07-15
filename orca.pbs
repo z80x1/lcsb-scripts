@@ -1,0 +1,84 @@
+#!/bin/bash
+set -x
+set -v
+#export
+
+if [ -z $PROGVER ]; then
+    PROGVER=orca
+fi
+if [ $PROGVER == orca30 ]; then
+    PROGVER=orca30
+fi
+
+
+#setting scratch directory
+SCRDIR=/mnt/scratch
+if [ -z "$scr" ]; then
+    echo 1 > /dev/null
+elif [ ! -d "$scr" ]; then
+    echo "Specified scratch directory $scr not exists, default one used"
+elif ! (df | grep "$scr" > /dev/null); then
+    echo "Specified scratch directory is not external mounted, default one used"
+else
+    SCRDIR=$scr
+fi
+
+. /var/local/bin/settings/$PROGVER.sh
+ORCA=$ORCADIR/orca
+
+# This job's working directory
+jobid=$(echo $PBS_JOBID|cut -d[ -f1)
+WORKDIR=$SCRDIR/$jobid-$PBS_ARRAYID-$PBS_O_LOGNAME-orca
+
+echo "Job started at $(date '+%Y-%m%d %H:%M:%S') from ${PBS_O_HOST}:${PBS_O_WORKDIR}, running on $(hostname) in ${WORKDIR} using $ORCA"
+# Determine number of threads
+NPROCS=`wc -l < $PBS_NODEFILE`
+echo This job runs with $NPROCS threads on the nodes: `cat $PBS_NODEFILE` 
+
+#VER=02
+if [ -z $INFILE ]; then
+    INFILE=joblist
+fi
+
+trap '
+	echo "Job terminated from outer space!"
+	cp "$OUT" "$PBS_O_WORKDIR/$OUT.part"
+	cp *.gbw "$PBS_O_WORKDIR"
+	rm -f ${WORKDIR}/*.tmp 
+	rm -f ${WORKDIR}/*.proc* 
+	exit
+' SIGTERM
+
+if [ ! -f $PBS_O_WORKDIR/$INFILE ]; then
+	echo Jobfile $PBS_O_WORKDIR/$INFILE is not found
+	exit 1;
+fi
+IN=`sed -n "$PBS_ARRAYID p" $PBS_O_WORKDIR/$INFILE`
+GBW=`echo "$IN" | sed 's/\.\S*/.gbw/'`
+OUT=`echo "$IN" | sed 's/\.\S*//'`-t$jobid-$PBS_ARRAYID.out
+
+mkdir -p $WORKDIR
+pushd $WORKDIR
+#echo Working directory is `pwd`
+
+cp "$PBS_O_WORKDIR/$IN" ./ 
+cp "$PBS_O_WORKDIR/$GBW" ./ 
+dos2unix "$IN"
+$ORCA "$IN" > "$OUT" 
+
+if [ -d "$PBS_O_WORKDIR/$OUT" ]; then
+	mv "$PBS_O_WORKDIR/$OUT" "$PBS_O_WORKDIR/$OUT.bak"
+fi
+cp "$OUT" "$PBS_O_WORKDIR"
+cp *.gbw "$PBS_O_WORKDIR"
+#cp ^(*.(inp|tmp*)) $PBS_O_WORKDIR/
+
+
+#need to be checked
+rm "$IN"
+popd
+echo After popd directory is `pwd`
+rm -rfv $WORKDIR
+
+echo Done!
+

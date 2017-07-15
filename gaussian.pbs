@@ -1,0 +1,167 @@
+#!/bin/bash
+
+if [ -z "$GAUSSVER" ]; then
+    GAUSSVER=g03
+fi
+
+early() 
+{
+	echo ' '
+	echo ' ############ WARNING:  EARLY TERMINATION, saving chk #############'
+	echo ' '
+
+echo IN is $IN, CHK is $CHK
+
+	ls *.wfn| while read file; do
+	    mv "$file" $PBS_O_WORKDIR/ ;
+	done
+
+	ls *.chk| while read file; do
+	    mv "$file" $PBS_O_WORKDIR/ ;
+	done
+}
+
+#set -x
+#set -v
+
+#Important!!  load Gaussian settings
+source /etc/gaussian/$GAUSSVER.sh
+jobid=$(echo $PBS_JOBID|cut -d[ -f1)
+
+echo ~~~scratch is "$scratch", raid is "$raid"
+#setting scratch directory
+if [ ! -z "$scratch" ]; then
+        GAUSS_SCRDIR="$scratch"
+else
+	if [ ! -z "$raid" ]; then
+		GAUSS_SCRDIR=/mnt/scratch_raid
+	fi
+	GAUSS_SCRDIR="$GAUSS_SCRDIR/$jobid-$PBS_ARRAYID-$PBS_O_LOGNAME-$GAUSSVER"
+fi
+# This job's working directory
+WORKDIR="$GAUSS_SCRDIR"
+
+#VER=01
+if [ -z "$INFILE" ]; then
+    INFILE="joblist"
+fi
+
+echo Time is `date`
+echo Running on host `hostname`
+echo Scratch directory is $GAUSS_SCRDIR
+echo PBS working directory is $PBS_O_WORKDIR
+
+echo This jobs runs on the following processors:
+echo `cat $PBS_NODEFILE`
+# Determine number of processors
+#old variant
+#NPROCS=`wc -l < $PBS_NODEFILE`
+echo This job has allocated $PBS_NP threads
+
+if ! mkdir -p "$WORKDIR"; then
+	echo "Cannot create work directory. Please, free space on `hostname` node";
+	exit 1;
+fi 
+
+pushd "$WORKDIR"
+echo Working directory is `pwd`
+
+if [ ! -f "$PBS_O_WORKDIR/$INFILE" ]; then
+	echo Joblist file $PBS_O_WORKDIR/$INFILE is not found
+	exit 1;
+fi
+#extracting input file from jobs list
+IN=$(sed -n "$PBS_ARRAYID p" $PBS_O_WORKDIR/$INFILE)
+dos2unix "$PBS_O_WORKDIR/$IN"
+#generating output file name
+OUT="$PBS_O_WORKDIR/$(echo "$IN" | sed 's/\.\S*//')-t$jobid-$PBS_ARRAYID.out"
+if [ -f "$OUT" ]; then
+    mv "$OUT" "$OUT.bak"
+fi
+
+#generating standart chk file name, and if it exists copy in to job working directory
+CHK=$PBS_O_WORKDIR/chk/$(grep %chk "$PBS_O_WORKDIR/$IN" | cut -d= -f2)
+if [ -f "$CHK" ]; then
+    echo "Copying checkpoint file $CHK"
+    cp "$CHK" "$WORKDIR"
+    mv "$CHK" "$CHK.bak"
+fi
+
+echo IN is $IN, OUT is $OUT, CHK is $CHK
+
+cp "$PBS_O_WORKDIR/$IN" ./
+
+#adding new line to Gaussian job - just in case
+echo -e "\n" >> ./"$IN"
+
+#export
+#TBD: memory specification in GJF
+#mem=111mb; 
+#if ! grep -i "%mem" $IN; then 
+#	sed -i "s/^#/%mem=$mem\n#/" $IN; 
+#fi
+#adding nproc specification
+if ! grep -i "%nproc" "$IN"; then 
+	sed -i "s/^#/%nproc=$PBS_NP\n#/" "$IN"; 
+fi
+#head $IN; 
+
+trap 'early' 2 9 15
+#run Gaussian
+$gexec "$IN" "$OUT"
+
+#copy CHK files to user directory
+#CHKFILE=`echo "$IN" | sed 's/\.\S*/.chk/'`
+#CHKFILE=`ls *.chk`
+ls *.chk| while read file; do
+    if [ ! -d "$PBS_O_WORKDIR/chk" ]; then
+      mkdir "$PBS_O_WORKDIR/chk"; 
+    fi
+    mv "$file" "$PBS_O_WORKDIR/chk" ;
+done
+
+#if we have WFN file then analyze it with AIMAll
+#then moving result files to user directory
+#WFNFILE=`echo "$IN" | sed 's/\.\S*/.wfn/'`
+#WFNFILE=`ls *.wfn`
+#echo WFNFILE is $WFNFILE
+#if [ -e "$WFNFILE" ]; then
+#    aimext_single.sh "$WORKDIR/$WFNFILE"
+#    AIMFILE=`echo "$IN" | sed 's/\.\S*/.extout/'`
+#
+#    if [ ! -e $PBS_O_WORKDIR/wfn ]; then
+#      mkdir $PBS_O_WORKDIR/wfn; 
+#    fi
+#    mv "$WFNFILE" $PBS_O_WORKDIR/wfn/ ;
+#    mv "$AIMFILE" $PBS_O_WORKDIR/wfn/ ;
+#fi
+ls *.wfn| while read file; do
+    aimext_single.sh "$file"
+    AIMFILE=`echo "$IN" | sed 's/\.\S*/.extout/'`
+
+    if [ ! -d "$PBS_O_WORKDIR/wfn" ]; then
+      mkdir "$PBS_O_WORKDIR/wfn"; 
+    fi
+    mv "$file" "$PBS_O_WORKDIR/wfn" ;
+    mv "$AIMFILE" "$PBS_O_WORKDIR/wfn/" ;
+done
+ls *.wfx| while read file; do
+    if [ ! -d "$PBS_O_WORKDIR/wfn" ]; then
+      mkdir "$PBS_O_WORKDIR/wfn"; 
+    fi
+    mv "$file" "$PBS_O_WORKDIR/wfn" ;
+done
+
+popd
+#cleaning
+rm -f "$WORKDIR"/*.gjf
+#for now removing only empty directories
+rmdir -v "$WORKDIR"
+
+    if [ -d "$WORKDIR" ]; then
+      ls -l "$WORKDIR";
+    fi
+
+#!!!check that all useful is saved to user directory
+rm -rf $WORKDIR
+

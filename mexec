@@ -1,0 +1,12 @@
+#!/bin/bash
+#executes command on all nodes
+if [ $# -lt 1 ]; then
+	echo No argument
+	exit
+fi
+f=$1
+
+for  node in alpha beta gamma delta epsilon zeta eta; do
+	echo -en "\033[1m ${node} \033[0m\n"
+	ssh -t $node "$1"
+done

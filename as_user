@@ -1,0 +1,4 @@
+#!/bin/bash
+#$1 - username
+#$2 - command to execute
+  su - $1 -c "bash -c '$2'"

@@ -1,0 +1,21 @@
+#!/bin/bash
+#This is much faster than using aimqb.exe like in batch.bat 
+
+if [ -z $INFILE ]; then
+    INFILE=joblist
+fi
+if [ ! -f $PBS_O_WORKDIR/$INFILE ]; then
+	echo Jobfile $PBS_O_WORKDIR/$INFILE is not found
+	exit 1;
+fi
+
+#set -x
+
+IN=`sed -n "$PBS_ARRAYID p" $PBS_O_WORKDIR/$INFILE`
+cd $PBS_O_WORKDIR
+
+echo "Job started from ${PBS_O_HOST}, running on $(hostname) in $(pwd)"
+
+aimext_single.sh $IN
+
+
